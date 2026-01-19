@@ -46,6 +46,8 @@
 - [x] Write backend README
 - [x] Write frontend README
 - [x] Write root README
+- [x] Document edge case handling in README
+- [x] Add AI assistance acknowledgment
 
 ---
 
@@ -60,6 +62,8 @@
 | 2026-01-18 | MTM = 30 days | Reasonable notice period assumption |
 | 2026-01-18 | Seed in migrations | Simplified setup for evaluators |
 | 2026-01-18 | UUIDs for IDs | Consistency with starter schema |
+| 2026-01-18 | Fire-and-forget webhooks | Don't block UX on delivery failures |
+| 2026-01-18 | 127.0.0.1 in Vite proxy | Avoids Windows DNS latency with localhost |
 
 ---
 

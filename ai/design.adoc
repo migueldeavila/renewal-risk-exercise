@@ -85,6 +85,48 @@ Higher database load compared to in-memory. For production scale, a dedicated qu
 
 ---
 
+=== D003b: Fire-and-Forget Webhook Delivery
+
+*Date:* 2026-01-18
+
+*Context:*
+When a user clicks "Trigger Event", should the API wait for webhook delivery to complete before responding?
+
+*Problem with synchronous delivery:*
+If the RMS endpoint is slow or down, the API would block for up to 31 seconds (5 retries with exponential backoff: 1+2+4+8+16 seconds). This creates a terrible user experience.
+
+*Decision:*
+Webhook delivery is *fire-and-forget* (asynchronous).
+
+*Implementation:*
+[source,typescript]
+----
+// Create event record in database
+const webhookDbId = await createWebhookEvent(...);
+
+// Fire-and-forget: don't await
+processWebhookDeliveryAsync(eventId, webhookDbId, payload, rmsEndpoint)
+  .catch(err => console.error(err));
+
+// Return immediately to user
+return { success: true, eventId, message: 'Event created. Delivery in progress.' };
+----
+
+*Rationale:*
+
+1. *Instant UI feedback* - User sees "Event created" immediately
+2. *Decoupled reliability* - Webhook failures don't affect user experience
+3. *Background retries* - Retries happen silently without blocking
+
+*Trade-off acknowledged:*
+The user doesn't know immediately if delivery succeeded. They can check status via the `/webhook-status` endpoint or see it in the dashboard. For a production system, you might add:
+
+- WebSocket/SSE for real-time status updates
+- A dedicated background worker process (not just in-process async)
+- A proper job queue (Bull, Agenda, etc.)
+
+---
+
 === D004: daysToExpiry Representation
 
 *Date:* 2026-01-18

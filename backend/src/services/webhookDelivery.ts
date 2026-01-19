@@ -208,13 +208,60 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Process webhook delivery asynchronously (fire-and-forget)
+ * This runs in the background and doesn't block the API response.
+ */
+async function processWebhookDeliveryAsync(
+  eventId: string,
+  webhookDbId: string,
+  payload: WebhookPayload,
+  rmsEndpoint: { url: string; secret: string }
+): Promise<void> {
+  let attemptCount = 0;
+  let lastResult = { success: false, statusCode: null as number | null, body: null as string | null };
+
+  while (attemptCount < MAX_RETRY_ATTEMPTS) {
+    attemptCount++;
+
+    lastResult = await deliverWebhook(rmsEndpoint.url, payload, rmsEndpoint.secret);
+
+    await updateWebhookEvent(
+      eventId,
+      lastResult.success,
+      lastResult.statusCode,
+      lastResult.body,
+      attemptCount
+    );
+
+    if (lastResult.success) {
+      console.log(`Webhook ${eventId} delivered successfully on attempt ${attemptCount}`);
+      return;
+    }
+
+    // Wait before retry (except on last attempt)
+    if (attemptCount < MAX_RETRY_ATTEMPTS) {
+      const delayMs = RETRY_DELAYS_MS[attemptCount - 1];
+      await sleep(delayMs);
+    }
+  }
+
+  // All retries failed - move to DLQ
+  await moveToDeadLetterQueue(
+    webhookDbId,
+    `Failed after ${MAX_RETRY_ATTEMPTS} attempts. Last error: ${lastResult.body || 'Unknown'}`
+  );
+
+  console.log(`Webhook ${eventId} failed after ${MAX_RETRY_ATTEMPTS} attempts, moved to DLQ`);
+}
+
+/**
  * Main function: Trigger renewal event webhook for a resident
  *
- * This function:
+ * This function is NON-BLOCKING:
  * 1. Checks idempotency (has this been triggered recently?)
  * 2. Creates webhook event record
- * 3. Attempts delivery with retries
- * 4. Moves to DLQ if all retries fail
+ * 3. Returns immediately to the caller
+ * 4. Processes delivery asynchronously in the background
  */
 export async function triggerRenewalEvent(
   propertyId: string,
@@ -266,48 +313,17 @@ export async function triggerRenewalEvent(
   // Create webhook event record
   const webhookDbId = await createWebhookEvent(eventId, propertyId, residentId, payload);
 
-  // Attempt delivery with retries
-  let attemptCount = 0;
-  let lastResult = { success: false, statusCode: null as number | null, body: null as string | null };
+  // Fire-and-forget: process delivery in background
+  // Don't await - let it run asynchronously
+  processWebhookDeliveryAsync(eventId, webhookDbId, payload, rmsEndpoint).catch((err) => {
+    console.error(`Background webhook delivery failed for ${eventId}:`, err);
+  });
 
-  while (attemptCount < MAX_RETRY_ATTEMPTS) {
-    attemptCount++;
-
-    lastResult = await deliverWebhook(rmsEndpoint.url, payload, rmsEndpoint.secret);
-
-    await updateWebhookEvent(
-      eventId,
-      lastResult.success,
-      lastResult.statusCode,
-      lastResult.body,
-      attemptCount
-    );
-
-    if (lastResult.success) {
-      return {
-        success: true,
-        eventId,
-        message: `Webhook delivered successfully on attempt ${attemptCount}`,
-      };
-    }
-
-    // Wait before retry (except on last attempt)
-    if (attemptCount < MAX_RETRY_ATTEMPTS) {
-      const delayMs = RETRY_DELAYS_MS[attemptCount - 1];
-      await sleep(delayMs);
-    }
-  }
-
-  // All retries failed - move to DLQ
-  await moveToDeadLetterQueue(
-    webhookDbId,
-    `Failed after ${MAX_RETRY_ATTEMPTS} attempts. Last error: ${lastResult.body || 'Unknown'}`
-  );
-
+  // Return immediately - webhook delivery happens in background
   return {
-    success: false,
+    success: true,
     eventId,
-    message: `Webhook delivery failed after ${MAX_RETRY_ATTEMPTS} attempts. Moved to DLQ.`,
+    message: 'Event created. Webhook delivery in progress.',
   };
 }
 
