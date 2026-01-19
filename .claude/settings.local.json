@@ -19,7 +19,9 @@
       "Bash(tasklist:*)",
       "Bash(wmic process where \"processid=9012\" get name,processid)",
       "Bash(node -e:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(tree:*)",
+      "Bash(wc:*)"
     ]
   }
 }

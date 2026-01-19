@@ -56,7 +56,7 @@ CREATE TABLE webhook_events (
 
   -- Delivery state
   status VARCHAR(20) NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'processing', 'delivered', 'failed')),
+    CHECK (status IN ('pending', 'delivered', 'failed')),
   attempt_count INTEGER NOT NULL DEFAULT 0,
 
   -- Retry tracking
@@ -79,7 +79,7 @@ CREATE TABLE webhook_events (
 -- Efficient query: WHERE status = 'pending' AND next_retry_at <= NOW()
 CREATE INDEX idx_webhook_events_retry
   ON webhook_events(status, next_retry_at)
-  WHERE status IN ('pending', 'processing');
+  WHERE status = 'pending';
 
 -- Index for idempotency checks
 CREATE INDEX idx_webhook_events_event_id

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { calculateRenewalRisk } from '../services/riskCalculation';
 import { triggerRenewalEvent, getWebhookStatus } from '../services/webhookDelivery';
 import { pool } from '../db';
+import { logError } from '../utils/logger';
 
 const router = Router();
 
@@ -58,7 +59,7 @@ router.post(
 
       return res.json(result);
     } catch (error) {
-      console.error('Error calculating renewal risk:', error);
+      logError({ operation: 'calculateRenewalRisk', propertyId: req.params.propertyId }, error);
       return res.status(500).json({
         error: 'Internal server error while calculating renewal risk.',
       });
@@ -233,7 +234,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Error fetching renewal risk:', error);
+      logError({ operation: 'getRenewalRisk', propertyId: req.params.propertyId }, error);
       return res.status(500).json({
         error: 'Internal server error while fetching renewal risk.',
       });
@@ -314,7 +315,7 @@ router.post(
         });
       }
     } catch (error) {
-      console.error('Error triggering renewal event:', error);
+      logError({ operation: 'triggerRenewalEvent', propertyId: req.params.propertyId, residentId: req.params.residentId }, error);
       return res.status(500).json({
         error: 'Internal server error while triggering renewal event.',
       });
@@ -343,7 +344,7 @@ router.get(
 
       return res.json(status);
     } catch (error) {
-      console.error('Error fetching webhook status:', error);
+      logError({ operation: 'getWebhookStatus', propertyId: req.params.propertyId, residentId: req.params.residentId }, error);
       return res.status(500).json({
         error: 'Internal server error while fetching webhook status.',
       });

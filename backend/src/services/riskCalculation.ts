@@ -270,7 +270,6 @@ export async function calculateRenewalRisk(
   }
 
   // Sort by risk score descending
-  flags.sort((a, b) => b.riskScore - a.riskTier.localeCompare(a.riskTier));
   flags.sort((a, b) => b.riskScore - a.riskScore);
 
   // Count by tier

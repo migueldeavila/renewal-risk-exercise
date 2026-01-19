@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { pool } from '../db';
 import { WebhookPayload, RiskSignals } from '../types';
+import { logError, logInfo, logWarn } from '../utils/logger';
 
 const MAX_RETRY_ATTEMPTS = 5;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]; // Exponential backoff
@@ -234,7 +235,7 @@ async function processWebhookDeliveryAsync(
     );
 
     if (lastResult.success) {
-      console.log(`Webhook ${eventId} delivered successfully on attempt ${attemptCount}`);
+      logInfo({ operation: 'webhookDelivery', eventId }, `Delivered successfully on attempt ${attemptCount}`);
       return;
     }
 
@@ -251,7 +252,7 @@ async function processWebhookDeliveryAsync(
     `Failed after ${MAX_RETRY_ATTEMPTS} attempts. Last error: ${lastResult.body || 'Unknown'}`
   );
 
-  console.log(`Webhook ${eventId} failed after ${MAX_RETRY_ATTEMPTS} attempts, moved to DLQ`);
+  logWarn({ operation: 'webhookDelivery', eventId }, `Failed after ${MAX_RETRY_ATTEMPTS} attempts, moved to DLQ`);
 }
 
 /**
@@ -316,7 +317,7 @@ export async function triggerRenewalEvent(
   // Fire-and-forget: process delivery in background
   // Don't await - let it run asynchronously
   processWebhookDeliveryAsync(eventId, webhookDbId, payload, rmsEndpoint).catch((err) => {
-    console.error(`Background webhook delivery failed for ${eventId}:`, err);
+    logError({ operation: 'webhookDeliveryAsync', eventId, propertyId, residentId }, err);
   });
 
   // Return immediately - webhook delivery happens in background

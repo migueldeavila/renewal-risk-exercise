@@ -391,7 +391,122 @@ In production, you would NEVER store signing secrets as plain text. A production
 
 ---
 
+### D012: Logging Strategy
+
+**Date:** 2026-01-18
+
+**Context:**
+Error handling needs to balance two concerns:
+1. **User-facing messages** should be generic (avoid leaking internal details)
+2. **Backend logs** need full stack traces for debugging
+
+**Decision:**
+Implemented a minimal custom logger (`src/utils/logger.ts`) that:
+- Logs full stack traces to console on errors
+- Includes context (operation name, propertyId, residentId, eventId)
+- Timestamps all log entries
+- Provides info/warn/error levels
+
+**Example output:**
+```
+============================================================
+[ERROR] 2026-01-18T14:30:00.000Z [calculateRenewalRisk] propertyId=abc-123
+Message: relation "renewal_risk_scores" does not exist
+Stack trace:
+    at Pool.query (...)
+    at calculateRenewalRisk (...)
+============================================================
+```
+
+**Why not a full logging framework (winston, pino)?**
+Time constraint. A minimal logger provides the key benefit (stack traces with context) without setup overhead.
+
+**Production improvements:**
+- Use structured logging (JSON format) for log aggregation
+- Add request correlation IDs for tracing
+- Configure log levels via environment variables
+- Send logs to aggregation service (DataDog, CloudWatch, etc.)
+- Add request/response logging middleware
+
+---
+
 ## Open Questions for Future Consideration
 
 1. Should risk scores be versioned or just latest per resident?
-2. What is the retention policy for old risk scores and webhook records?
+
+---
+
+## Future Work: Data Cleanup and Archiving
+
+### D011: Data Retention and Cleanup Strategy
+
+**Date:** 2026-01-18
+
+**Context:**
+Over time, the following tables will accumulate significant data:
+- `renewal_risk_scores` - New records created on every calculation
+- `webhook_events` - New records for every triggered event
+- `webhook_dlq` - Failed webhooks accumulate until manually addressed
+
+Without cleanup, these tables will grow unbounded, affecting query performance and storage costs.
+
+**Recommended Approach:**
+
+A background job (cron job or scheduled task) should handle data lifecycle management:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Data Retention Strategy                       │
+├─────────────────────┬───────────────────────────────────────────┤
+│ Table               │ Recommended Policy                        │
+├─────────────────────┼───────────────────────────────────────────┤
+│ renewal_risk_scores │ Keep latest per resident + 90 days        │
+│                     │ historical. Archive older to cold storage │
+├─────────────────────┼───────────────────────────────────────────┤
+│ webhook_events      │ Keep 30 days for delivered events.        │
+│                     │ Keep 90 days for failed events (audit).   │
+│                     │ Archive older to cold storage.            │
+├─────────────────────┼───────────────────────────────────────────┤
+│ webhook_dlq         │ Manual review required before deletion.   │
+│                     │ Alert if items older than 7 days exist.   │
+└─────────────────────┴───────────────────────────────────────────┘
+```
+
+**Implementation Options:**
+
+1. **PostgreSQL pg_cron extension** - Native scheduled jobs within the database
+2. **Application-level scheduler** - Node.js cron (node-cron, agenda) running cleanup queries
+3. **External scheduler** - Kubernetes CronJob, AWS EventBridge, or CI/CD scheduled pipeline
+
+**Example Cleanup Queries:**
+
+```sql
+-- Archive risk scores older than 90 days (keeping latest per resident)
+WITH latest_per_resident AS (
+  SELECT DISTINCT ON (resident_id) id
+  FROM renewal_risk_scores
+  ORDER BY resident_id, calculated_at DESC
+)
+DELETE FROM renewal_risk_scores
+WHERE calculated_at < NOW() - INTERVAL '90 days'
+  AND id NOT IN (SELECT id FROM latest_per_resident);
+
+-- Archive delivered webhooks older than 30 days
+DELETE FROM webhook_events
+WHERE status = 'delivered'
+  AND delivered_at < NOW() - INTERVAL '30 days';
+
+-- Alert on stale DLQ items (would be a SELECT for monitoring)
+SELECT COUNT(*) FROM webhook_dlq
+WHERE moved_to_dlq_at < NOW() - INTERVAL '7 days';
+```
+
+**Not Implemented Because:**
+This is a take-home exercise with a 2-hour limit. Data cleanup is a production concern that would be defined by product requirements (retention policies, compliance needs, storage budgets).
+
+**Production Considerations:**
+- Retention policies should be defined by product/legal requirements
+- Consider partitioning tables by date for efficient bulk deletes
+- Archive to cold storage (S3, GCS) before deletion for compliance
+- Monitor table sizes and set alerts for unexpected growth
+- DLQ items require human review before deletion - implement a review workflow
