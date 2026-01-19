@@ -1,6 +1,6 @@
 -- Migration 002: Renewal Risk and Webhook Delivery Schema
 -- Purpose: Track risk scores and webhook delivery state
--- Design decisions documented in: ai/design.adoc
+-- Design decisions documented in: docs/design.md
 
 -- Renewal Risk Scores
 -- Stores calculated risk scores at a point in time for audit trail

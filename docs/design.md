@@ -19,6 +19,15 @@
   - [webhook_events](#webhook_events)
   - [webhook_dlq](#webhook_dlq)
   - [D010: Webhook Signing Secret Storage](#d010-webhook-signing-secret-storage)
+- [Future Work & Additional Decisions](#future-work--additional-decisions)
+  - [D011: Data Retention and Cleanup Strategy](#d011-data-retention-and-cleanup-strategy)
+  - [D012: Logging Strategy](#d012-logging-strategy)
+  - [D013: Unit Testing Strategy](#d013-unit-testing-strategy)
+  - [D014: Hardcoded Property ID in Frontend](#d014-hardcoded-property-id-in-frontend)
+  - [D015: Idempotency Window Duration](#d015-idempotency-window-duration)
+  - [D016: Batch Calculation Without Limit](#d016-batch-calculation-without-limit)
+  - [D017: Concurrency and Locking Strategy](#d017-concurrency-and-locking-strategy)
+  - [D018: Risk Score Storage vs API Response](#d018-risk-score-storage-vs-api-response)
 - [Open Questions for Future Consideration](#open-questions-for-future-consideration)
 
 ## Overview
@@ -430,13 +439,201 @@ Time constraint. A minimal logger provides the key benefit (stack traces with co
 
 ---
 
+### D013: Unit Testing Strategy
+
+**Date:** 2026-01-18
+
+**Context:**
+Adding unit tests to validate core business logic without requiring database connections.
+
+**Decision:**
+- Extracted pure scoring functions into `riskScoring.ts` for testability
+- Used Jest with ts-jest for TypeScript support
+- Focused tests on the risk scoring logic (most critical business logic)
+
+**Test Coverage:**
+- `calculateDaysToExpiryScore` - All threshold boundaries
+- `calculatePaymentScore` - Boolean logic
+- `calculateRenewalOfferScore` - Boolean logic
+- `isRentAboveMarket` - Null handling, 5% threshold
+- `getRiskTier` - Tier boundaries
+- `calculateDaysToExpiry` - Month-to-month handling, expired leases
+- `calculateTotalRiskScore` - Integration of all components
+
+**Run tests:**
+```bash
+npm test           # Run once
+npm test:watch     # Watch mode
+npm test:coverage  # With coverage report
+```
+
+**Why not integration tests?**
+Time constraint. Integration tests require database setup/teardown which adds complexity. The pure function unit tests provide good coverage of the core business logic.
+
+**Production improvements:**
+- Add integration tests for API endpoints
+- Add database integration tests with test containers
+- Add end-to-end tests for critical flows
+- Set up CI/CD pipeline to run tests on PR
+
+---
+
+### D014: Hardcoded Property ID in Frontend
+
+**Date:** 2026-01-18
+
+**Context:**
+The frontend needs a property ID to fetch risk data. Options:
+1. Hardcode the seed data property ID
+2. Use React Router with dynamic route parameter
+3. Add a property selector dropdown
+
+**Decision:**
+Hardcode the property ID from seed data in `App.tsx`.
+
+**Rationale:**
+- This is a take-home exercise, not a production app
+- Simplifies setup for evaluators (no need to find/enter property ID)
+- The problem statement shows a single-property dashboard at `/properties/:propertyId/renewal-risk`
+- Adding React Router would be over-engineering for the scope
+
+**Production improvements:**
+- Use React Router for `/properties/:propertyId/renewal-risk`
+- Add property selector or derive from user authentication context
+
+---
+
+### D015: Idempotency Window Duration
+
+**Date:** 2026-01-18
+
+**Context:**
+When a user triggers a webhook event, the system checks for recent events to prevent duplicates. What time window should we use?
+
+**Decision:**
+Use a **1-hour idempotency window**. If an event was triggered for the same resident within the last hour, return the existing event instead of creating a new one.
+
+**Rationale:**
+- Prevents accidental double-clicks or UI bugs from creating duplicate events
+- 1 hour is long enough to catch user mistakes
+- Short enough that legitimate re-triggers (e.g., after risk score changes) aren't blocked for too long
+- The RMS should also implement idempotency via `eventId`, so this is defense-in-depth
+
+**Trade-off:**
+If a property manager legitimately needs to re-trigger an event within 1 hour (e.g., after updating resident data), they must wait. For production, consider making this configurable or adding a "force re-trigger" option for admins.
+
+---
+
+### D016: Batch Calculation Without Limit
+
+**Date:** 2026-01-18
+
+**Context:**
+The `POST /calculate` endpoint fetches all residents for a property in a single query to calculate their risk scores. For large properties (5000+ residents), this could cause memory issues or timeouts.
+
+**Current Implementation:**
+Single query fetches all residents at once, processes them in memory, then batch-inserts results.
+
+**Decision:**
+Leave as-is for the take-home exercise scope.
+
+**Production Improvements:**
+- Process residents in batches (e.g., 500 at a time) using LIMIT/OFFSET or cursor-based pagination
+- Use streaming/cursor queries to avoid loading all rows into memory
+- Consider async job queue (Bull, Agenda) for very large properties
+- Add progress tracking for long-running calculations
+- Implement cancellation support for stuck jobs
+
+**Example batched approach:**
+```typescript
+const BATCH_SIZE = 500;
+let offset = 0;
+let batch;
+
+do {
+  batch = await getResidentsBatch(propertyId, asOfDate, BATCH_SIZE, offset);
+  const scores = calculateScoresForBatch(batch);
+  await saveScoresBatch(scores);
+  offset += BATCH_SIZE;
+} while (batch.length === BATCH_SIZE);
+```
+
+---
+
+### D017: Concurrency and Locking Strategy
+
+**Date:** 2026-01-18
+
+**Context:**
+Multiple API requests could trigger concurrent operations:
+- Two simultaneous risk calculations for the same property
+- Two webhook triggers for the same resident at the same instant
+- Webhook retry processing while a new trigger arrives
+
+**Decision:**
+No explicit application-level locking. Rely on database constraints and "latest wins" semantics.
+
+**Current Behavior:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Concurrent risk calculations | Both succeed, insert separate records. GET returns most recent by `calculated_at` |
+| Concurrent webhook triggers | `event_id` UNIQUE constraint prevents duplicates. Second insert fails gracefully |
+| Transaction isolation | PostgreSQL default `READ COMMITTED` level |
+| Batch inserts | Wrapped in transaction for atomicity |
+
+**Why no explicit locking:**
+- Simplicity for take-home scope
+- Database constraints provide sufficient protection
+- No data corruption possible, worst case is duplicate computation
+- "Latest wins" is acceptable for this use case
+
+**Production Improvements:**
+- Add advisory locks for risk calculations: `SELECT pg_advisory_lock(hashtext(property_id))`
+- Use `INSERT ... ON CONFLICT` for idempotent webhook creation
+- Consider optimistic locking with version columns for frequently updated records
+- Add distributed locking (Redis) if running multiple backend instances
+- Use `SELECT ... FOR UPDATE` when reading then updating webhook status
+
+**Example advisory lock:**
+```sql
+-- Acquire lock before calculation (blocks concurrent calculations for same property)
+SELECT pg_advisory_lock(hashtext($1));  -- $1 = property_id
+
+-- ... perform calculation ...
+
+-- Release lock
+SELECT pg_advisory_unlock(hashtext($1));
+```
+
+---
+
+### D018: Risk Score Storage vs API Response
+
+**Date:** 2026-01-18
+
+**Context:**
+When calculating risk scores, should we store all residents or only flagged ones? And what should the API return?
+
+**Decision:**
+- **Database:** Store ALL residents (including low risk) for complete audit trail
+- **API Response:** Return only flagged residents (medium + high risk) in the `flags` array
+
+**Rationale:**
+- Per problem statement: "Store risk scores for each resident" (all)
+- Per problem statement output: `flaggedCount` and `flags` suggest filtered response
+- Storing all enables historical analysis and trend detection
+- Returning only flagged keeps API responses focused and smaller
+
+---
+
 ## Open Questions for Future Consideration
 
 1. Should risk scores be versioned or just latest per resident?
 
 ---
 
-## Future Work: Data Cleanup and Archiving
+## Future Work & Additional Decisions
 
 ### D011: Data Retention and Cleanup Strategy
 

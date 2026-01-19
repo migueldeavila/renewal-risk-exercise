@@ -10,6 +10,16 @@ cp .env.example .env
 npm run dev
 ```
 
+## Testing
+
+```bash
+npm test           # Run all tests
+npm run test:watch # Watch mode for development
+npm run test:coverage # With coverage report
+```
+
+Unit tests cover the risk scoring logic in `src/services/riskScoring.ts`.
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -249,8 +259,8 @@ When the RMS endpoint is unavailable or returns a non-2xx response:
 
 Residents with expired fixed-term leases are still included in risk calculations:
 
-- `days_to_expiry` will be negative (e.g., -30 if lease ended 30 days ago)
-- Risk score will be very high due to the days-to-expiry factor
+- `days_to_expiry` will be 0 for expired leases (clamped to prevent negative values)
+- Risk score will be high (40 points for the days-to-expiry factor alone)
 - This allows property managers to identify residents who may be on month-to-month holdover
 
 ### Month-to-Month Leases
@@ -258,7 +268,7 @@ Residents with expired fixed-term leases are still included in risk calculations
 Month-to-month leases don't have a fixed end date. The system handles this by:
 
 - Treating MTM residents as having 30 days to expiry (typical notice period)
-- See `D006` in `ai/design.adoc` for rationale
+- See `D006` in `docs/design.md` for rationale
 
 ### No Market Rent Data Available
 
@@ -301,4 +311,4 @@ This project was developed with assistance from Claude (Anthropic). The AI was u
 - Documentation writing
 - Debugging and troubleshooting
 
-All AI-generated code was reviewed, tested, and modified as needed. Design decisions were made collaboratively with the human developer, with rationale documented in `ai/design.adoc`.
+All AI-generated code was reviewed, tested, and modified as needed. Design decisions were made collaboratively with the human developer, with rationale documented in `docs/design.md`.

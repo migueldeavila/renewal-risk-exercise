@@ -125,10 +125,46 @@ Frontend (React)          Backend (Express)           Database (PostgreSQL)
 
 ## Design Decisions
 
-See `ai/design.adoc` for detailed architectural decisions including:
+See `docs/design.md` for detailed architectural decisions (D001-D018) including:
 - D001: Risk signal data types (boolean vs numeric)
 - D006: Month-to-month lease handling (treated as 30 days)
 - D009: UUID vs sequential IDs
+- D017: Concurrency and locking strategy
+
+## Agentic Development
+
+This project was developed entirely using **Claude Code** powered by **Claude Opus 4.5**.
+
+### What AI Did Well
+
+- **Initial code generation**: The entirety of the backend API, database schema, React dashboard, and unit tests were written by the AI agent
+- **Test writing**: Produced comprehensive unit tests (23 tests) covering all risk scoring edge cases
+- **Tool utilization**: Efficiently used available tools (file reading, editing, bash commands, grep/glob searches) to navigate and modify the codebase
+- **Documentation**: Generated thorough design decision documentation with rationale and trade-offs
+
+### Where Human Guidance Was Needed
+
+- **Tool installation issues**: Required some refinement when setting up dependencies and configuring Jest
+- **Webhook timeout bug**: Initially implemented synchronous webhook delivery, which would block the API if the RMS endpoint failed. Needed nudging to implement fire-and-forget async delivery
+- **UI feedback**: Since the agent cannot visually interact with the frontend, human feedback was needed to verify the dashboard rendered correctly
+- **Implicit decisions**: Some architectural decisions were made implicitly during coding and needed to be explicitly documented after review
+
+### Architectural Discussion Process
+
+1. **Initial groundwork**: The problem statement provided requirements; human created initial design document outline
+2. **Human refinement**: Expanded on key architectural decisions (webhook delivery strategy, multi-tenancy approach)
+3. **Agent implementation**: AI filled in implementation details, making pragmatic decisions along the way
+4. **AI-assisted review**: A separate evaluation pass by the AI agent identified undocumented decisions and potential issues (sorting bug, documentation mismatches)
+5. **Collaborative documentation**: Human and AI worked together to document all implicit decisions (D011-D018)
+
+### Tradeoffs
+
+| AI Strength | AI Limitation |
+|-------------|---------------|
+| Fast iteration on boilerplate code | Cannot verify visual UI correctness |
+| Consistent code style | Occasionally makes assumptions that need correction |
+| Thorough edge case consideration | May over-engineer if not constrained |
+| Good at explaining decisions | Needs explicit prompting to document implicit choices |
 
 ## Project Structure
 
@@ -146,6 +182,6 @@ rr/
 │   │   ├── components/       # React components
 │   │   └── App.tsx
 │   └── vite.config.ts
-├── ai/                       # Design docs and progress tracking
+├── docs/                     # Design docs and progress tracking
 └── docker-compose.yml
 ```

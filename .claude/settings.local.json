@@ -21,7 +21,9 @@
       "Bash(node -e:*)",
       "mcp__ide__getDiagnostics",
       "Bash(tree:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)"
     ]
   }
 }

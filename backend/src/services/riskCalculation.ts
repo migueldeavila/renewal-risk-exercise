@@ -5,95 +5,10 @@ import {
   RenewalRiskResponse,
   RiskSignals,
 } from '../types';
-
-/**
- * Risk Scoring Formula (from problem statement):
- * - Days to lease expiry: 40% weight
- * - Payment delinquency: 25% weight
- * - No renewal offer yet: 20% weight
- * - Rent growth above market: 15% weight
- *
- * See ai/design.adoc for detailed design decisions.
- */
-
-const WEIGHTS = {
-  DAYS_TO_EXPIRY: 40,
-  PAYMENT_DELINQUENCY: 25,
-  NO_RENEWAL_OFFER: 20,
-  RENT_ABOVE_MARKET: 15,
-};
-
-/**
- * Calculate days-to-expiry score (0-40 points)
- * Fewer days = higher risk
- *
- * Month-to-month leases are treated as 30 days (see D006 in design.adoc)
- */
-function calculateDaysToExpiryScore(daysToExpiry: number): number {
-  if (daysToExpiry > 90) return 0;
-  if (daysToExpiry > 60) return 10;
-  if (daysToExpiry > 45) return 20;
-  if (daysToExpiry > 30) return 30;
-  return WEIGHTS.DAYS_TO_EXPIRY; // 40 points for <= 30 days
-}
-
-/**
- * Calculate payment delinquency score (0 or 25 points)
- * Any late fee = delinquent
- */
-function calculatePaymentScore(hasLateFee: boolean): number {
-  return hasLateFee ? WEIGHTS.PAYMENT_DELINQUENCY : 0;
-}
-
-/**
- * Calculate renewal offer score (0 or 20 points)
- * No offer = higher risk
- */
-function calculateRenewalOfferScore(hasRenewalOffer: boolean): number {
-  return hasRenewalOffer ? 0 : WEIGHTS.NO_RENEWAL_OFFER;
-}
-
-/**
- * Calculate rent growth score (0 or 15 points)
- * Market rent > current rent = higher risk (they may leave for cheaper)
- */
-function calculateRentGrowthScore(
-  monthlyRent: number,
-  marketRent: number | null
-): boolean {
-  if (marketRent === null) return false;
-  // If market rent is more than 5% above current rent, flag it
-  return marketRent > monthlyRent * 1.05;
-}
-
-/**
- * Determine risk tier from score
- */
-function getRiskTier(score: number): 'high' | 'medium' | 'low' {
-  if (score >= 70) return 'high';
-  if (score >= 40) return 'medium';
-  return 'low';
-}
-
-/**
- * Calculate days to expiry, handling month-to-month leases
- */
-function calculateDaysToExpiry(
-  leaseEndDate: Date,
-  leaseType: string,
-  asOfDate: Date
-): number {
-  // Month-to-month: treat as 30 days (see D006)
-  if (leaseType === 'month_to_month') {
-    return 30;
-  }
-
-  const diffTime = leaseEndDate.getTime() - asOfDate.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  // If lease already expired, return 0
-  return Math.max(0, diffDays);
-}
+import {
+  calculateDaysToExpiry,
+  calculateTotalRiskScore,
+} from './riskScoring';
 
 /**
  * Query residents with all data needed for risk calculation
@@ -233,23 +148,14 @@ export async function calculateRenewalRisk(
       asOfDate
     );
 
-    const rentAboveMarket = calculateRentGrowthScore(
+    // Use the extracted scoring function
+    const { score: riskScore, tier: riskTier, rentAboveMarket } = calculateTotalRiskScore(
+      daysToExpiry,
+      resident.has_late_fee,
+      resident.has_renewal_offer,
       Number(resident.monthly_rent),
       resident.market_rent ? Number(resident.market_rent) : null
     );
-
-    // Calculate component scores
-    const daysScore = calculateDaysToExpiryScore(daysToExpiry);
-    const paymentScore = calculatePaymentScore(resident.has_late_fee);
-    const renewalScore = calculateRenewalOfferScore(resident.has_renewal_offer);
-    const rentScore = rentAboveMarket ? WEIGHTS.RENT_ABOVE_MARKET : 0;
-
-    // Total score (max 100)
-    const riskScore = Math.min(
-      100,
-      daysScore + paymentScore + renewalScore + rentScore
-    );
-    const riskTier = getRiskTier(riskScore);
 
     const signals: RiskSignals = {
       daysToExpiryDays: daysToExpiry,
