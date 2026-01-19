@@ -7,6 +7,23 @@ import { logError } from '../utils/logger';
 const router = Router();
 
 /**
+ * GET /api/v1/properties
+ *
+ * Returns list of properties. Used by frontend to get property ID if not configured.
+ */
+router.get('/properties', async (_req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, address FROM properties ORDER BY name LIMIT 10'
+    );
+    return res.json({ properties: result.rows });
+  } catch (error) {
+    logError({ operation: 'getProperties' }, error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
  * POST /api/v1/properties/:propertyId/renewal-risk/calculate
  *
  * Triggers renewal risk calculation for a property.

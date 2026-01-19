@@ -478,28 +478,31 @@ Time constraint. Integration tests require database setup/teardown which adds co
 
 ---
 
-### D014: Hardcoded Property ID in Frontend
+### D014: Property ID Configuration
 
 **Date:** 2026-01-18
 
 **Context:**
-The frontend needs a property ID to fetch risk data. Options:
-1. Hardcode the seed data property ID
-2. Use React Router with dynamic route parameter
-3. Add a property selector dropdown
+The frontend needs a property ID to fetch risk data. The property ID is generated dynamically (UUID) when running migrations, so it changes on each fresh setup.
 
 **Decision:**
-Hardcode the property ID from seed data in `App.tsx`.
+Auto-fetch the first property from the API as a fallback if no environment variable is set.
+
+**Implementation:**
+1. Check for `VITE_PROPERTY_ID` environment variable
+2. If not set, call `GET /api/v1/properties` to fetch available properties
+3. Use the first property returned
+4. Display property name in header
 
 **Rationale:**
-- This is a take-home exercise, not a production app
-- Simplifies setup for evaluators (no need to find/enter property ID)
-- The problem statement shows a single-property dashboard at `/properties/:propertyId/renewal-risk`
-- Adding React Router would be over-engineering for the scope
+- Zero-config setup for evaluators - just run migrations and start servers
+- Environment variable still supported for explicit configuration
+- Graceful error handling if no properties exist or API is down
 
 **Production improvements:**
 - Use React Router for `/properties/:propertyId/renewal-risk`
-- Add property selector or derive from user authentication context
+- Add property selector dropdown for multi-property users
+- Derive default property from user authentication context
 
 ---
 

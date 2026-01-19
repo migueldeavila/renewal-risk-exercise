@@ -187,7 +187,7 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
 
       // Reset to page 1 and refetch after calculation
       setPage(1);
-      // Fetch will be triggered by useEffect
+      await fetchRiskData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Calculation failed');
     } finally {

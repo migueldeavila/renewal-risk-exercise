@@ -16,13 +16,19 @@ A full-stack application that identifies residents at risk of not renewing their
 docker-compose up -d
 
 # 2. Run migrations (includes seed data)
+# On Linux/Mac/Git Bash:
 docker exec -i renewal_risk_db psql -U postgres -d renewal_risk < backend/migrations/001_starter_schema.sql
 docker exec -i renewal_risk_db psql -U postgres -d renewal_risk < backend/migrations/002_renewal_risk_schema.sql
 docker exec -i renewal_risk_db psql -U postgres -d renewal_risk < backend/migrations/003_seed_data.sql
 
+# On Windows PowerShell:
+Get-Content backend/migrations/001_starter_schema.sql | docker exec -i renewal_risk_db psql -U postgres -d renewal_risk
+Get-Content backend/migrations/002_renewal_risk_schema.sql | docker exec -i renewal_risk_db psql -U postgres -d renewal_risk
+Get-Content backend/migrations/003_seed_data.sql | docker exec -i renewal_risk_db psql -U postgres -d renewal_risk
+
 # 3. Start backend
 cd backend
-cp .env.example .env
+cp .env.example .env   # On PowerShell: Copy-Item .env.example .env
 npm install
 npm run dev
 
@@ -35,25 +41,37 @@ npm run dev
 ### Access
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:3001
-- **Property ID** (from seed): `30214fdb-5381-4d9c-adfe-c59fccb4099d`
+
+The frontend automatically fetches the first property from the database. No manual configuration needed.
 
 ## Testing
 
+First, get the property ID:
+```bash
+# Get property ID from database
+docker exec renewal_risk_db psql -U postgres -d renewal_risk -t -c "SELECT id FROM properties LIMIT 1;"
+
+# Or via API
+curl -s http://localhost:3001/api/v1/properties | jq -r '.properties[0].id'
+```
+
+Then use it in the commands below (replace `$PROPERTY_ID`):
+
 ### Calculate Risk Scores
 ```bash
-curl -X POST http://localhost:3001/api/v1/properties/30214fdb-5381-4d9c-adfe-c59fccb4099d/renewal-risk/calculate \
+curl -X POST http://localhost:3001/api/v1/properties/$PROPERTY_ID/renewal-risk/calculate \
   -H "Content-Type: application/json" \
   -d '{"asOfDate": "2026-01-18"}'
 ```
 
 ### Get Risk Data
 ```bash
-curl http://localhost:3001/api/v1/properties/30214fdb-5381-4d9c-adfe-c59fccb4099d/renewal-risk
+curl http://localhost:3001/api/v1/properties/$PROPERTY_ID/renewal-risk
 ```
 
 ### Trigger Webhook Event
 ```bash
-curl -X POST http://localhost:3001/api/v1/properties/30214fdb-5381-4d9c-adfe-c59fccb4099d/residents/{residentId}/trigger-event
+curl -X POST http://localhost:3001/api/v1/properties/$PROPERTY_ID/residents/{residentId}/trigger-event
 ```
 
 ### Test Webhook Delivery
@@ -66,9 +84,9 @@ cd mock-rms
 npm install
 npm start
 
-# Update database to point to mock RMS
+# Update database to point to mock RMS (replace $PROPERTY_ID with your UUID)
 docker exec renewal_risk_db psql -U postgres -d renewal_risk -c \
-  "UPDATE rms_endpoints SET endpoint_url = 'http://localhost:4000/webhook' WHERE property_id = '30214fdb-5381-4d9c-adfe-c59fccb4099d';"
+  "UPDATE rms_endpoints SET endpoint_url = 'http://localhost:4000/webhook' WHERE property_id = '$PROPERTY_ID';"
 ```
 
 The mock server verifies HMAC signatures and logs received webhooks. See `mock-rms/README.md` for details.
@@ -78,10 +96,10 @@ The mock server verifies HMAC signatures and logs received webhooks. See `mock-r
 **Option B: Use webhook.site**
 
 1. Go to https://webhook.site and copy your unique URL
-2. Update the RMS endpoint:
+2. Update the RMS endpoint (replace `$PROPERTY_ID` with your UUID):
    ```bash
    docker exec renewal_risk_db psql -U postgres -d renewal_risk -c \
-     "UPDATE rms_endpoints SET endpoint_url = 'YOUR_WEBHOOK_SITE_URL' WHERE property_id = '30214fdb-5381-4d9c-adfe-c59fccb4099d';"
+     "UPDATE rms_endpoints SET endpoint_url = 'YOUR_WEBHOOK_SITE_URL' WHERE property_id = '$PROPERTY_ID';"
    ```
 3. Click "Trigger Event" in the dashboard or use the API
 4. Check webhook.site for the delivered payload (note: signature won't be verified)
