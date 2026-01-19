@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { RenewalRiskResponse, ResidentRiskFlag } from '../types';
+import { useState, useEffect, useCallback } from 'react';
+import { RenewalRiskResponse, ResidentRiskFlag, RiskTierFilter, SortField, SortOrder } from '../types';
 
 interface Props {
   propertyId: string;
@@ -134,9 +134,23 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [calculating, setCalculating] = useState(false);
 
-  const fetchRiskData = async () => {
+  // Pagination and filtering state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [tierFilter, setTierFilter] = useState<RiskTierFilter>('all');
+  const [sortBy, setSortBy] = useState<SortField>('riskScore');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  const fetchRiskData = useCallback(async () => {
     try {
-      const response = await fetch(`/api/v1/properties/${propertyId}/renewal-risk`);
+      const params = new URLSearchParams({
+        page: page.toString(),
+        pageSize: pageSize.toString(),
+        tier: tierFilter,
+        sortBy,
+        sortOrder,
+      });
+      const response = await fetch(`/api/v1/properties/${propertyId}/renewal-risk?${params}`);
       if (response.status === 404) {
         // No calculations yet - that's OK
         setData(null);
@@ -153,7 +167,7 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [propertyId, page, pageSize, tierFilter, sortBy, sortOrder]);
 
   const runCalculation = async () => {
     setCalculating(true);
@@ -171,9 +185,9 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
         throw new Error('Failed to calculate risk');
       }
 
-      const result = await response.json();
-      setData(result);
-      setError(null);
+      // Reset to page 1 and refetch after calculation
+      setPage(1);
+      // Fetch will be triggered by useEffect
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Calculation failed');
     } finally {
@@ -183,7 +197,29 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
 
   useEffect(() => {
     fetchRiskData();
-  }, [propertyId]);
+  }, [fetchRiskData]);
+
+  // Reset to page 1 when filters change
+  const handleTierFilterChange = (newTier: RiskTierFilter) => {
+    setTierFilter(newTier);
+    setPage(1);
+  };
+
+  const handleSortChange = (field: SortField) => {
+    if (sortBy === field) {
+      // Toggle order if same field
+      setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortBy(field);
+      setSortOrder('desc');
+    }
+    setPage(1);
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize);
+    setPage(1);
+  };
 
   if (loading) {
     return (
@@ -229,25 +265,53 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
         </button>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards - Clickable filters */}
       {data && (
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-lg border p-4">
+          <button
+            onClick={() => handleTierFilterChange('all')}
+            className={`rounded-lg border p-4 text-left transition-all ${
+              tierFilter === 'all'
+                ? 'bg-gray-100 border-gray-400 ring-2 ring-gray-400'
+                : 'bg-white hover:bg-gray-50'
+            }`}
+          >
             <div className="text-2xl font-bold text-gray-800">{data.totalResidents}</div>
             <div className="text-sm text-gray-500">Total Residents</div>
-          </div>
-          <div className="bg-red-50 rounded-lg border border-red-200 p-4">
+          </button>
+          <button
+            onClick={() => handleTierFilterChange('high')}
+            className={`rounded-lg border p-4 text-left transition-all ${
+              tierFilter === 'high'
+                ? 'bg-red-100 border-red-400 ring-2 ring-red-400'
+                : 'bg-red-50 border-red-200 hover:bg-red-100'
+            }`}
+          >
             <div className="text-2xl font-bold text-red-600">{data.riskTiers.high}</div>
             <div className="text-sm text-red-500">High Risk</div>
-          </div>
-          <div className="bg-yellow-50 rounded-lg border border-yellow-200 p-4">
+          </button>
+          <button
+            onClick={() => handleTierFilterChange('medium')}
+            className={`rounded-lg border p-4 text-left transition-all ${
+              tierFilter === 'medium'
+                ? 'bg-yellow-100 border-yellow-400 ring-2 ring-yellow-400'
+                : 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100'
+            }`}
+          >
             <div className="text-2xl font-bold text-yellow-600">{data.riskTiers.medium}</div>
             <div className="text-sm text-yellow-500">Medium Risk</div>
-          </div>
-          <div className="bg-green-50 rounded-lg border border-green-200 p-4">
+          </button>
+          <button
+            onClick={() => handleTierFilterChange('low')}
+            className={`rounded-lg border p-4 text-left transition-all ${
+              tierFilter === 'low'
+                ? 'bg-green-100 border-green-400 ring-2 ring-green-400'
+                : 'bg-green-50 border-green-200 hover:bg-green-100'
+            }`}
+          >
             <div className="text-2xl font-bold text-green-600">{data.riskTiers.low}</div>
             <div className="text-sm text-green-500">Low Risk</div>
-          </div>
+          </button>
         </div>
       )}
 
@@ -272,10 +336,40 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resident</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <button
+                    onClick={() => handleSortChange('name')}
+                    className="flex items-center gap-1 hover:text-gray-700"
+                  >
+                    Resident
+                    {sortBy === 'name' && (
+                      <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </button>
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days to Expiry</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Risk Score</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <button
+                    onClick={() => handleSortChange('daysToExpiry')}
+                    className="flex items-center gap-1 hover:text-gray-700"
+                  >
+                    Days to Expiry
+                    {sortBy === 'daysToExpiry' && (
+                      <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </button>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <button
+                    onClick={() => handleSortChange('riskScore')}
+                    className="flex items-center gap-1 hover:text-gray-700"
+                  >
+                    Risk Score
+                    {sortBy === 'riskScore' && (
+                      <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </button>
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
               </tr>
             </thead>
@@ -289,12 +383,80 @@ export default function RenewalRiskDashboard({ propertyId }: Props) {
               ))}
             </tbody>
           </table>
+
+          {/* Pagination Controls */}
+          {data.pagination && (
+            <div className="bg-gray-50 border-t px-6 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">
+                  Showing {((data.pagination.page - 1) * data.pagination.pageSize) + 1} to{' '}
+                  {Math.min(data.pagination.page * data.pagination.pageSize, data.pagination.totalItems)} of{' '}
+                  {data.pagination.totalItems} results
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                  className="border rounded px-2 py-1 text-sm"
+                >
+                  <option value={5}>5 per page</option>
+                  <option value={10}>10 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={!data.pagination.hasPrevPage}
+                  className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  First
+                </button>
+                <button
+                  onClick={() => setPage(page - 1)}
+                  disabled={!data.pagination.hasPrevPage}
+                  className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  Prev
+                </button>
+                <span className="text-sm text-gray-600 px-2">
+                  Page {data.pagination.page} of {data.pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(page + 1)}
+                  disabled={!data.pagination.hasNextPage}
+                  className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  Next
+                </button>
+                <button
+                  onClick={() => setPage(data.pagination!.totalPages)}
+                  disabled={!data.pagination.hasNextPage}
+                  className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                >
+                  Last
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {data && data.flags.length === 0 && (
-        <div className="bg-green-50 rounded-lg border border-green-200 p-8 text-center">
-          <p className="text-green-700">No residents flagged as at-risk.</p>
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-8 text-center">
+          {tierFilter !== 'all' ? (
+            <>
+              <p className="text-gray-600 mb-2">No {tierFilter} risk residents found.</p>
+              <button
+                onClick={() => handleTierFilterChange('all')}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                Show all residents
+              </button>
+            </>
+          ) : (
+            <p className="text-green-700">No residents flagged as at-risk.</p>
+          )}
         </div>
       )}
     </div>

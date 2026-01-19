@@ -70,12 +70,26 @@ router.post(
  * GET /api/v1/properties/:propertyId/renewal-risk
  *
  * Gets the most recent risk calculation results for a property.
+ *
+ * Query params:
+ *   - page: Page number (1-indexed, default: 1)
+ *   - pageSize: Results per page (default: 10, max: 100)
+ *   - tier: Filter by risk tier ('all', 'high', 'medium', 'low', default: 'all')
+ *   - sortBy: Sort field ('riskScore', 'daysToExpiry', 'name', default: 'riskScore')
+ *   - sortOrder: Sort direction ('asc', 'desc', default: 'desc')
  */
 router.get(
   '/properties/:propertyId/renewal-risk',
   async (req: Request, res: Response) => {
     try {
       const { propertyId } = req.params;
+
+      // Parse and validate query params
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 10));
+      const tierFilter = (req.query.tier as string) || 'all';
+      const sortBy = (req.query.sortBy as string) || 'riskScore';
+      const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'ASC' : 'DESC';
 
       // Validate propertyId format
       const uuidRegex =
@@ -85,6 +99,22 @@ router.get(
           error: 'Invalid propertyId format. Expected UUID.',
         });
       }
+
+      // Validate tier filter
+      const validTiers = ['all', 'high', 'medium', 'low'];
+      if (!validTiers.includes(tierFilter)) {
+        return res.status(400).json({
+          error: `Invalid tier filter. Expected one of: ${validTiers.join(', ')}`,
+        });
+      }
+
+      // Map sortBy to database column
+      const sortColumnMap: Record<string, string> = {
+        riskScore: 'rrs.risk_score',
+        daysToExpiry: 'rrs.days_to_expiry',
+        name: 'r.last_name',
+      };
+      const sortColumn = sortColumnMap[sortBy] || 'rrs.risk_score';
 
       // Get the most recent calculation timestamp
       const latestCalc = await pool.query(
@@ -105,7 +135,30 @@ router.get(
 
       const calculatedAt = latestCalc.rows[0].calculated_at;
 
-      // Get all risk scores from that calculation
+      // Build tier condition
+      let tierCondition = '';
+      const queryParams: (string | Date)[] = [propertyId, calculatedAt];
+
+      if (tierFilter !== 'all') {
+        tierCondition = ` AND rrs.risk_tier = $3`;
+        queryParams.push(tierFilter);
+      }
+
+      // Get total count for pagination (respecting tier filter)
+      const countResult = await pool.query(
+        `SELECT COUNT(*) as total
+         FROM renewal_risk_scores rrs
+         WHERE rrs.property_id = $1
+           AND rrs.calculated_at = $2${tierCondition}`,
+        queryParams
+      );
+      const totalFiltered = parseInt(countResult.rows[0].total);
+
+      // Calculate offset
+      const offset = (page - 1) * pageSize;
+
+      // Get paginated risk scores
+      const paginationParams = [...queryParams, pageSize, offset];
       const risksResult = await pool.query(
         `SELECT
           rrs.resident_id,
@@ -122,9 +175,10 @@ router.get(
          JOIN residents r ON r.id = rrs.resident_id
          JOIN units u ON u.id = r.unit_id
          WHERE rrs.property_id = $1
-           AND rrs.calculated_at = $2
-         ORDER BY rrs.risk_score DESC`,
-        [propertyId, calculatedAt]
+           AND rrs.calculated_at = $2${tierCondition}
+         ORDER BY ${sortColumn} ${sortOrder}
+         LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
+        paginationParams
       );
 
       // Transform to API response format
@@ -143,22 +197,40 @@ router.get(
         },
       }));
 
-      // Only include flagged (medium/high risk)
-      const flaggedResidents = flags.filter((f) => f.riskTier !== 'low');
+      // Get total counts per tier (for summary cards)
+      const tierCountsResult = await pool.query(
+        `SELECT risk_tier, COUNT(*) as count
+         FROM renewal_risk_scores
+         WHERE property_id = $1 AND calculated_at = $2
+         GROUP BY risk_tier`,
+        [propertyId, calculatedAt]
+      );
 
-      const riskTiers = {
-        high: flags.filter((f) => f.riskTier === 'high').length,
-        medium: flags.filter((f) => f.riskTier === 'medium').length,
-        low: flags.filter((f) => f.riskTier === 'low').length,
-      };
+      const riskTiers = { high: 0, medium: 0, low: 0 };
+      for (const row of tierCountsResult.rows) {
+        if (row.risk_tier in riskTiers) {
+          riskTiers[row.risk_tier as keyof typeof riskTiers] = parseInt(row.count);
+        }
+      }
+
+      const totalResidents = riskTiers.high + riskTiers.medium + riskTiers.low;
+      const totalPages = Math.ceil(totalFiltered / pageSize);
 
       return res.json({
         propertyId,
         calculatedAt: calculatedAt.toISOString(),
-        totalResidents: flags.length,
-        flaggedCount: flaggedResidents.length,
+        totalResidents,
+        flaggedCount: riskTiers.high + riskTiers.medium,
         riskTiers,
-        flags: flaggedResidents,
+        flags,
+        pagination: {
+          page,
+          pageSize,
+          totalItems: totalFiltered,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
       });
     } catch (error) {
       console.error('Error fetching renewal risk:', error);

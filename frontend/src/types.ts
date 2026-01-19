@@ -15,6 +15,15 @@ export interface ResidentRiskFlag {
   signals: RiskSignals;
 }
 
+export interface PaginationInfo {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
 export interface RenewalRiskResponse {
   propertyId: string;
   calculatedAt: string;
@@ -26,4 +35,9 @@ export interface RenewalRiskResponse {
     low: number;
   };
   flags: ResidentRiskFlag[];
+  pagination?: PaginationInfo;
 }
+
+export type RiskTierFilter = 'all' | 'high' | 'medium' | 'low';
+export type SortField = 'riskScore' | 'daysToExpiry' | 'name';
+export type SortOrder = 'asc' | 'desc';
