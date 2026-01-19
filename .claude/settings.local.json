@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(git --version:*)",
+      "Bash(docker:*)",
+      "Bash(psql:*)",
+      "Bash(curl:*)",
+      "Bash(systeminfo:*)",
+      "Bash(findstr:*)",
+      "Bash(wsl --status:*)",
+      "Bash(wsl --list --verbose:*)",
+      "Bash(powershell -Command \"Get-ComputerInfo | Select-Object HyperVisorPresent, HyperVRequirementVirtualizationFirmwareEnabled\")",
+      "Bash(docker-compose exec:*)",
+      "Bash(npm install)",
+      "Bash(npx ts-node:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)",
+      "Bash(wmic process where \"processid=9012\" get name,processid)",
+      "Bash(node -e:*)"
+    ]
+  }
+}
