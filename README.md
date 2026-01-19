@@ -57,6 +57,26 @@ curl -X POST http://localhost:3001/api/v1/properties/30214fdb-5381-4d9c-adfe-c59
 ```
 
 ### Test Webhook Delivery
+
+**Option A: Use the included Mock RMS server** (recommended)
+
+```bash
+# Terminal 3: Start mock RMS
+cd mock-rms
+npm install
+npm start
+
+# Update database to point to mock RMS
+docker exec renewal_risk_db psql -U postgres -d renewal_risk -c \
+  "UPDATE rms_endpoints SET endpoint_url = 'http://localhost:4000/webhook' WHERE property_id = '30214fdb-5381-4d9c-adfe-c59fccb4099d';"
+```
+
+The mock server verifies HMAC signatures and logs received webhooks. See `mock-rms/README.md` for details.
+
+**Note:** The signing secret must match between the database (`rms_endpoints.signing_secret`) and the mock server (`SIGNING_SECRET` env var). Both default to `dev-webhook-secret`.
+
+**Option B: Use webhook.site**
+
 1. Go to https://webhook.site and copy your unique URL
 2. Update the RMS endpoint:
    ```bash
@@ -64,7 +84,7 @@ curl -X POST http://localhost:3001/api/v1/properties/30214fdb-5381-4d9c-adfe-c59
      "UPDATE rms_endpoints SET endpoint_url = 'YOUR_WEBHOOK_SITE_URL' WHERE property_id = '30214fdb-5381-4d9c-adfe-c59fccb4099d';"
    ```
 3. Click "Trigger Event" in the dashboard or use the API
-4. Check webhook.site for the delivered payload
+4. Check webhook.site for the delivered payload (note: signature won't be verified)
 
 ## Architecture
 
